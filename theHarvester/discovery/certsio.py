@@ -1,3 +1,4 @@
+import requests
 import ujson
 
 from theHarvester.discovery.constants import MissingKey
@@ -26,9 +27,10 @@ class SearchCertsio:
             "X-RapidAPI-Key": f"{self.key}",
             "X-RapidAPI-Host": "certs-io1.p.rapidapi.com",
         }
-        response = await AsyncFetcher.post_fetch(url, data=ujson.dumps(payload), json=True, headers=headers, proxy=self.proxy)
-        self.totalhosts = response
-        print(response)
+        response = requests.post(url, json=payload, headers=headers, proxies=self.proxy)
+        output = response.json()
+        results = output.get('certificates')[0]['ssl_names']
+        self.totalhosts = results
 
     async def get_hostnames(self) -> list:
         return self.totalhosts

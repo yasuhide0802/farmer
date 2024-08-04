@@ -65,7 +65,7 @@ async def start(rest_args: argparse.Namespace | None = None):
     parser = argparse.ArgumentParser(
         description='theHarvester is used to gather open source intelligence (OSINT) on a company or domain.'
     )
-    parser.add_argument('-d', '--domain', help='Company name or domain to search.', required=True)
+    parser.add_argument('-d', '--domain', help='Company name or domain to search.')
     parser.add_argument(
         '-l',
         '--limit',
@@ -155,6 +155,12 @@ async def start(rest_args: argparse.Namespace | None = None):
                             urlscan, virustotal, yahoo, zoomeye""",
     )
 
+    parser.add_argument(
+        '--domainlist',
+        help='File containing a list of domains.',
+        type=str,
+    )
+
     # determines if filename is coming from rest api or user
     rest_filename = ''
     # indicates this from the rest API
@@ -174,6 +180,25 @@ async def start(rest_args: argparse.Namespace | None = None):
         args = parser.parse_args()
         filename = args.filename
         dnsbrute = (args.dns_brute, False)
+
+    # Check if neither -d/--domain nor --domainlist is provided
+    if not args.domain and not args.domainlist:
+        parser.print_help()
+        print('\nError: Either -d/--domain or --domainlist must be provided.')
+        sys.exit(1)
+
+    # Initialize domainLists from file if --domainlist is provided
+    if args.domainlist:
+        domain_list_file = args.domainlist
+        try:
+            with open(domain_list_file) as f:
+                domainLists = [line.strip() for line in f.readlines() if line.strip()]
+        except FileNotFoundError:
+            print(f"Error: File '{domain_list_file}' not found.")
+            sys.exit(1)
+    else:
+        domainLists = [args.domain] if args.domain else []
+
     try:
         db = stash.StashManager()
         await db.do_init()
@@ -237,7 +262,6 @@ async def start(rest_args: argparse.Namespace | None = None):
     all_urls: list = []
     vhost: list = []
     virtual = args.virtual_host
-    word: str = args.domain.rstrip('\n')
     takeover_status = args.take_over
     use_proxy = args.proxies
     linkedin_people_list_tracker: list = []
@@ -282,6 +306,7 @@ async def start(rest_args: argparse.Namespace | None = None):
         :param store_interestingurls: whether to store interesting urls
         :param store_asns: whether to store asns
         """
+
         await search_engine.process(use_proxy) if process_param is None else await search_engine.process(process_param, use_proxy)
         db_stash = stash.StashManager()
 
@@ -355,526 +380,527 @@ async def start(rest_args: argparse.Namespace | None = None):
                 await db.store_all(word, fasns, 'asns', engineitem)
 
     stor_lst = []
-    if args.source is not None:
-        if args.source.lower() != 'all':
-            engines = sorted(set(map(str.strip, args.source.split(','))))
-        else:
-            engines = Core.get_supportedengines()
-        # Iterate through search engines in order
-        if set(engines).issubset(Core.get_supportedengines()):
-            print(f'\n[*] Target: {word} \n')
+    for word in domainLists:
+        if args.source is not None:
+            if args.source.lower() != 'all':
+                engines = sorted(set(map(str.strip, args.source.split(','))))
+            else:
+                engines = Core.get_supportedengines()
+            # Iterate through search engines in order
+            if set(engines).issubset(Core.get_supportedengines()):
+                print(f'\n[*] Target: {word} \n')
 
-            for engineitem in engines:
-                if engineitem == 'anubis':
-                    try:
-                        anubis_search = anubis.SearchAnubis(word)
-                        stor_lst.append(store(anubis_search, engineitem, store_host=True))
-                    except Exception as e:
-                        print(e)
+                for engineitem in engines:
+                    if engineitem == 'anubis':
+                        try:
+                            anubis_search = anubis.SearchAnubis(word)
+                            stor_lst.append(store(anubis_search, engineitem, store_host=True))
+                        except Exception as e:
+                            print(e)
 
-                elif engineitem == 'baidu':
-                    try:
-                        baidu_search = baidusearch.SearchBaidu(word, limit)
+                    elif engineitem == 'baidu':
+                        try:
+                            baidu_search = baidusearch.SearchBaidu(word, limit)
+                            stor_lst.append(
+                                store(
+                                    baidu_search,
+                                    engineitem,
+                                    store_host=True,
+                                    store_emails=True,
+                                )
+                            )
+                        except Exception as e:
+                            print(e)
+
+                    elif engineitem == 'bevigil':
+                        try:
+                            bevigil_search = bevigil.SearchBeVigil(word)
+                            stor_lst.append(
+                                store(
+                                    bevigil_search,
+                                    engineitem,
+                                    store_host=True,
+                                    store_interestingurls=True,
+                                )
+                            )
+                        except Exception as e:
+                            print(e)
+
+                    elif engineitem == 'binaryedge':
+                        try:
+                            binaryedge_search = binaryedgesearch.SearchBinaryEdge(word, limit)
+                            stor_lst.append(store(binaryedge_search, engineitem, store_host=True))
+                        except Exception as e:
+                            print(e)
+
+                    elif engineitem == 'bing' or engineitem == 'bingapi':
+                        try:
+                            bing_search = bingsearch.SearchBing(word, limit, start)
+                            bingapi = ''
+                            if engineitem == 'bingapi':
+                                bingapi += 'yes'
+                            else:
+                                bingapi += 'no'
+                            stor_lst.append(
+                                store(
+                                    bing_search,
+                                    'bing',
+                                    process_param=bingapi,
+                                    store_host=True,
+                                    store_emails=True,
+                                )
+                            )
+                        except Exception as e:
+                            if isinstance(e, MissingKey):
+                                print(e)
+                            else:
+                                print(e)
+
+                    elif engineitem == 'bufferoverun':
+                        try:
+                            bufferoverun_search = bufferoverun.SearchBufferover(word)
+                            stor_lst.append(
+                                store(
+                                    bufferoverun_search,
+                                    engineitem,
+                                    store_host=True,
+                                    store_ip=True,
+                                )
+                            )
+                        except Exception as e:
+                            print(e)
+
+                    elif engineitem == 'brave':
+                        try:
+                            brave_search = bravesearch.SearchBrave(word, limit)
+                            stor_lst.append(
+                                store(
+                                    brave_search,
+                                    engineitem,
+                                    store_host=True,
+                                    store_emails=True,
+                                )
+                            )
+                        except Exception as e:
+                            print(e)
+
+                    elif engineitem == 'censys':
+                        try:
+                            censys_search = censysearch.SearchCensys(word, limit)
+                            stor_lst.append(
+                                store(
+                                    censys_search,
+                                    engineitem,
+                                    store_host=True,
+                                    store_emails=True,
+                                )
+                            )
+                        except Exception as e:
+                            if isinstance(e, MissingKey):
+                                print(e)
+
+                    elif engineitem == 'certspotter':
+                        try:
+                            certspotter_search = certspottersearch.SearchCertspoter(word)
+                            stor_lst.append(store(certspotter_search, engineitem, None, store_host=True))
+                        except Exception as e:
+                            print(e)
+
+                    elif engineitem == 'criminalip':
+                        try:
+                            criminalip_search = criminalip.SearchCriminalIP(word)
+                            stor_lst.append(
+                                store(
+                                    criminalip_search,
+                                    engineitem,
+                                    store_host=True,
+                                    store_ip=True,
+                                    store_asns=True,
+                                )
+                            )
+                        except Exception as e:
+                            if isinstance(e, MissingKey):
+                                print(e)
+                            else:
+                                print(f'An excepion has occurred in criminalip: {e}')
+
+                    elif engineitem == 'crtsh':
+                        try:
+                            crtsh_search = crtsh.SearchCrtsh(word)
+                            stor_lst.append(store(crtsh_search, 'CRTsh', store_host=True))
+                        except Exception as e:
+                            print(f'[!] A timeout occurred with crtsh, cannot find {args.domain}\n {e}')
+
+                    elif engineitem == 'dnsdumpster':
+                        try:
+                            dns_dumpster_search = dnsdumpster.SearchDnsDumpster(word)
+                            stor_lst.append(
+                                store(
+                                    dns_dumpster_search,
+                                    engineitem,
+                                    store_host=True,
+                                    store_ip=True,
+                                )
+                            )
+                        except Exception as e:
+                            print(f'[!] An error occurred with dnsdumpster: {e}')
+
+                    elif engineitem == 'duckduckgo':
+                        duckduckgo_search = duckduckgosearch.SearchDuckDuckGo(word, limit)
                         stor_lst.append(
                             store(
-                                baidu_search,
+                                duckduckgo_search,
                                 engineitem,
                                 store_host=True,
                                 store_emails=True,
                             )
                         )
-                    except Exception as e:
-                        print(e)
 
-                elif engineitem == 'bevigil':
-                    try:
-                        bevigil_search = bevigil.SearchBeVigil(word)
-                        stor_lst.append(
-                            store(
-                                bevigil_search,
-                                engineitem,
-                                store_host=True,
-                                store_interestingurls=True,
+                    elif engineitem == 'fullhunt':
+                        try:
+                            fullhunt_search = fullhuntsearch.SearchFullHunt(word)
+                            stor_lst.append(store(fullhunt_search, engineitem, store_host=True))
+                        except Exception as e:
+                            if isinstance(e, MissingKey):
+                                print(e)
+
+                    elif engineitem == 'github-code':
+                        try:
+                            github_search = githubcode.SearchGithubCode(word, limit)
+                            stor_lst.append(
+                                store(
+                                    github_search,
+                                    engineitem,
+                                    store_host=True,
+                                    store_emails=True,
+                                )
                             )
-                        )
-                    except Exception as e:
-                        print(e)
+                        except MissingKey as ex:
+                            print(ex)
 
-                elif engineitem == 'binaryedge':
-                    try:
-                        binaryedge_search = binaryedgesearch.SearchBinaryEdge(word, limit)
-                        stor_lst.append(store(binaryedge_search, engineitem, store_host=True))
-                    except Exception as e:
-                        print(e)
+                    elif engineitem == 'hackertarget':
+                        hackertarget_search = hackertarget.SearchHackerTarget(word)
+                        stor_lst.append(store(hackertarget_search, engineitem, store_host=True))
 
-                elif engineitem == 'bing' or engineitem == 'bingapi':
-                    try:
-                        bing_search = bingsearch.SearchBing(word, limit, start)
-                        bingapi = ''
-                        if engineitem == 'bingapi':
-                            bingapi += 'yes'
-                        else:
-                            bingapi += 'no'
-                        stor_lst.append(
-                            store(
-                                bing_search,
-                                'bing',
-                                process_param=bingapi,
-                                store_host=True,
-                                store_emails=True,
+                    elif engineitem == 'hunter':
+                        try:
+                            hunter_search = huntersearch.SearchHunter(word, limit, start)
+                            stor_lst.append(
+                                store(
+                                    hunter_search,
+                                    engineitem,
+                                    store_host=True,
+                                    store_emails=True,
+                                )
                             )
-                        )
-                    except Exception as e:
-                        if isinstance(e, MissingKey):
-                            print(e)
-                        else:
-                            print(e)
+                        except Exception as e:
+                            if isinstance(e, MissingKey):
+                                print(e)
 
-                elif engineitem == 'bufferoverun':
-                    try:
-                        bufferoverun_search = bufferoverun.SearchBufferover(word)
-                        stor_lst.append(
-                            store(
-                                bufferoverun_search,
-                                engineitem,
-                                store_host=True,
-                                store_ip=True,
+                    elif engineitem == 'hunterhow':
+                        try:
+                            hunterhow_search = searchhunterhow.SearchHunterHow(word)
+                            stor_lst.append(store(hunterhow_search, engineitem, store_host=True))
+                        except Exception as e:
+                            if isinstance(e, MissingKey):
+                                print(e)
+                            else:
+                                print(f'An exception has occurred in hunterhow search: {e}')
+
+                    elif engineitem == 'intelx':
+                        try:
+                            intelx_search = intelxsearch.SearchIntelx(word)
+                            stor_lst.append(
+                                store(
+                                    intelx_search,
+                                    engineitem,
+                                    store_interestingurls=True,
+                                    store_emails=True,
+                                )
                             )
-                        )
-                    except Exception as e:
-                        print(e)
+                        except Exception as e:
+                            if isinstance(e, MissingKey):
+                                print(e)
+                            else:
+                                print(f'An exception has occurred in Intelx search: {e}')
 
-                elif engineitem == 'brave':
-                    try:
-                        brave_search = bravesearch.SearchBrave(word, limit)
-                        stor_lst.append(
-                            store(
-                                brave_search,
-                                engineitem,
-                                store_host=True,
-                                store_emails=True,
+                    elif engineitem == 'netlas':
+                        try:
+                            netlas_search = netlas.SearchNetlas(word)
+                            stor_lst.append(
+                                store(
+                                    netlas_search,
+                                    engineitem,
+                                    store_host=True,
+                                    store_ip=True,
+                                )
                             )
-                        )
-                    except Exception as e:
-                        print(e)
+                        except Exception as e:
+                            if isinstance(e, MissingKey):
+                                print(e)
 
-                elif engineitem == 'censys':
-                    try:
-                        censys_search = censysearch.SearchCensys(word, limit)
-                        stor_lst.append(
-                            store(
-                                censys_search,
-                                engineitem,
-                                store_host=True,
-                                store_emails=True,
+                    elif engineitem == 'onyphe':
+                        try:
+                            onyphe_search = onyphe.SearchOnyphe(word)
+                            stor_lst.append(
+                                store(
+                                    onyphe_search,
+                                    engineitem,
+                                    store_host=True,
+                                    store_ip=True,
+                                    store_asns=True,
+                                )
                             )
-                        )
-                    except Exception as e:
-                        if isinstance(e, MissingKey):
-                            print(e)
-
-                elif engineitem == 'certspotter':
-                    try:
-                        certspotter_search = certspottersearch.SearchCertspoter(word)
-                        stor_lst.append(store(certspotter_search, engineitem, None, store_host=True))
-                    except Exception as e:
-                        print(e)
-
-                elif engineitem == 'criminalip':
-                    try:
-                        criminalip_search = criminalip.SearchCriminalIP(word)
-                        stor_lst.append(
-                            store(
-                                criminalip_search,
-                                engineitem,
-                                store_host=True,
-                                store_ip=True,
-                                store_asns=True,
-                            )
-                        )
-                    except Exception as e:
-                        if isinstance(e, MissingKey):
-                            print(e)
-                        else:
-                            print(f'An excepion has occurred in criminalip: {e}')
-
-                elif engineitem == 'crtsh':
-                    try:
-                        crtsh_search = crtsh.SearchCrtsh(word)
-                        stor_lst.append(store(crtsh_search, 'CRTsh', store_host=True))
-                    except Exception as e:
-                        print(f'[!] A timeout occurred with crtsh, cannot find {args.domain}\n {e}')
-
-                elif engineitem == 'dnsdumpster':
-                    try:
-                        dns_dumpster_search = dnsdumpster.SearchDnsDumpster(word)
-                        stor_lst.append(
-                            store(
-                                dns_dumpster_search,
-                                engineitem,
-                                store_host=True,
-                                store_ip=True,
-                            )
-                        )
-                    except Exception as e:
-                        print(f'[!] An error occurred with dnsdumpster: {e}')
-
-                elif engineitem == 'duckduckgo':
-                    duckduckgo_search = duckduckgosearch.SearchDuckDuckGo(word, limit)
-                    stor_lst.append(
-                        store(
-                            duckduckgo_search,
-                            engineitem,
-                            store_host=True,
-                            store_emails=True,
-                        )
-                    )
-
-                elif engineitem == 'fullhunt':
-                    try:
-                        fullhunt_search = fullhuntsearch.SearchFullHunt(word)
-                        stor_lst.append(store(fullhunt_search, engineitem, store_host=True))
-                    except Exception as e:
-                        if isinstance(e, MissingKey):
+                        except Exception as e:
                             print(e)
 
-                elif engineitem == 'github-code':
-                    try:
-                        github_search = githubcode.SearchGithubCode(word, limit)
-                        stor_lst.append(
-                            store(
-                                github_search,
-                                engineitem,
-                                store_host=True,
-                                store_emails=True,
+                    elif engineitem == 'otx':
+                        try:
+                            otxsearch_search = otxsearch.SearchOtx(word)
+                            stor_lst.append(
+                                store(
+                                    otxsearch_search,
+                                    engineitem,
+                                    store_host=True,
+                                    store_ip=True,
+                                )
                             )
-                        )
-                    except MissingKey as ex:
-                        print(ex)
-
-                elif engineitem == 'hackertarget':
-                    hackertarget_search = hackertarget.SearchHackerTarget(word)
-                    stor_lst.append(store(hackertarget_search, engineitem, store_host=True))
-
-                elif engineitem == 'hunter':
-                    try:
-                        hunter_search = huntersearch.SearchHunter(word, limit, start)
-                        stor_lst.append(
-                            store(
-                                hunter_search,
-                                engineitem,
-                                store_host=True,
-                                store_emails=True,
-                            )
-                        )
-                    except Exception as e:
-                        if isinstance(e, MissingKey):
+                        except Exception as e:
                             print(e)
 
-                elif engineitem == 'hunterhow':
-                    try:
-                        hunterhow_search = searchhunterhow.SearchHunterHow(word)
-                        stor_lst.append(store(hunterhow_search, engineitem, store_host=True))
-                    except Exception as e:
-                        if isinstance(e, MissingKey):
-                            print(e)
-                        else:
-                            print(f'An exception has occurred in hunterhow search: {e}')
+                    elif engineitem == 'pentesttools':
+                        try:
+                            pentesttools_search = pentesttools.SearchPentestTools(word)
+                            stor_lst.append(store(pentesttools_search, engineitem, store_host=True))
+                        except Exception as e:
+                            if isinstance(e, MissingKey):
+                                print(e)
+                            else:
+                                print(f'An exception has occurred in PentestTools search: {e}')
 
-                elif engineitem == 'intelx':
-                    try:
-                        intelx_search = intelxsearch.SearchIntelx(word)
-                        stor_lst.append(
-                            store(
-                                intelx_search,
-                                engineitem,
-                                store_interestingurls=True,
-                                store_emails=True,
+                    elif engineitem == 'projectdiscovery':
+                        try:
+                            projectdiscovery_search = projectdiscovery.SearchDiscovery(word)
+                            stor_lst.append(store(projectdiscovery_search, engineitem, store_host=True))
+                        except Exception as e:
+                            if isinstance(e, MissingKey):
+                                print(e)
+                            else:
+                                print('An exception has occurred in ProjectDiscovery')
+
+                    elif engineitem == 'rapiddns':
+                        try:
+                            rapiddns_search = rapiddns.SearchRapidDns(word)
+                            stor_lst.append(store(rapiddns_search, engineitem, store_host=True))
+                        except Exception as e:
+                            print(e)
+
+                    elif engineitem == 'rocketreach':
+                        try:
+                            rocketreach_search = rocketreach.SearchRocketReach(word, limit)
+                            stor_lst.append(store(rocketreach_search, engineitem, store_links=True))
+                        except Exception as e:
+                            if isinstance(e, MissingKey):
+                                print(e)
+                            else:
+                                print(f'An exception has occurred in RocketReach: {e}')
+
+                    elif engineitem == 'subdomaincenter':
+                        try:
+                            subdomaincenter_search = subdomaincenter.SubdomainCenter(word)
+                            stor_lst.append(store(subdomaincenter_search, engineitem, store_host=True))
+                        except Exception as e:
+                            print(e)
+
+                    elif engineitem == 'securityTrails':
+                        try:
+                            securitytrails_search = securitytrailssearch.SearchSecuritytrail(word)
+                            stor_lst.append(
+                                store(
+                                    securitytrails_search,
+                                    engineitem,
+                                    store_host=True,
+                                    store_ip=True,
+                                )
                             )
-                        )
-                    except Exception as e:
-                        if isinstance(e, MissingKey):
-                            print(e)
-                        else:
-                            print(f'An exception has occurred in Intelx search: {e}')
+                        except Exception as e:
+                            if isinstance(e, MissingKey):
+                                print(e)
 
-                elif engineitem == 'netlas':
-                    try:
-                        netlas_search = netlas.SearchNetlas(word)
-                        stor_lst.append(
-                            store(
-                                netlas_search,
-                                engineitem,
-                                store_host=True,
-                                store_ip=True,
+                    elif engineitem == 'sitedossier':
+                        try:
+                            sitedossier_search = sitedossier.SearchSitedossier(word)
+                            stor_lst.append(store(sitedossier_search, engineitem, store_host=True))
+                        except Exception as e:
+                            print(e)
+
+                    elif engineitem == 'subdomainfinderc99':
+                        try:
+                            subdomainfinderc99_search = subdomainfinderc99.SearchSubdomainfinderc99(word)
+                            stor_lst.append(store(subdomainfinderc99_search, engineitem, store_host=True))
+                        except Exception as e:
+                            if isinstance(e, MissingKey):
+                                print(e)
+                            else:
+                                print(f'An exception has occurred in Subdomainfinderc99 search: {e}')
+
+                    elif engineitem == 'threatminer':
+                        try:
+                            threatminer_search = threatminer.SearchThreatminer(word)
+                            stor_lst.append(
+                                store(
+                                    threatminer_search,
+                                    engineitem,
+                                    store_host=True,
+                                    store_ip=True,
+                                )
                             )
-                        )
-                    except Exception as e:
-                        if isinstance(e, MissingKey):
+                        except Exception as e:
                             print(e)
 
-                elif engineitem == 'onyphe':
-                    try:
-                        onyphe_search = onyphe.SearchOnyphe(word)
-                        stor_lst.append(
-                            store(
-                                onyphe_search,
-                                engineitem,
-                                store_host=True,
-                                store_ip=True,
-                                store_asns=True,
+                    elif engineitem == 'tomba':
+                        try:
+                            tomba_search = tombasearch.SearchTomba(word, limit, start)
+                            stor_lst.append(
+                                store(
+                                    tomba_search,
+                                    engineitem,
+                                    store_host=True,
+                                    store_emails=True,
+                                )
                             )
-                        )
-                    except Exception as e:
-                        print(e)
+                        except Exception as e:
+                            if isinstance(e, MissingKey):
+                                print(e)
 
-                elif engineitem == 'otx':
-                    try:
-                        otxsearch_search = otxsearch.SearchOtx(word)
-                        stor_lst.append(
-                            store(
-                                otxsearch_search,
-                                engineitem,
-                                store_host=True,
-                                store_ip=True,
+                    elif engineitem == 'urlscan':
+                        try:
+                            urlscan_search = urlscan.SearchUrlscan(word)
+                            stor_lst.append(
+                                store(
+                                    urlscan_search,
+                                    engineitem,
+                                    store_host=True,
+                                    store_ip=True,
+                                    store_interestingurls=True,
+                                    store_asns=True,
+                                )
                             )
-                        )
-                    except Exception as e:
-                        print(e)
-
-                elif engineitem == 'pentesttools':
-                    try:
-                        pentesttools_search = pentesttools.SearchPentestTools(word)
-                        stor_lst.append(store(pentesttools_search, engineitem, store_host=True))
-                    except Exception as e:
-                        if isinstance(e, MissingKey):
+                        except Exception as e:
                             print(e)
-                        else:
-                            print(f'An exception has occurred in PentestTools search: {e}')
 
-                elif engineitem == 'projectdiscovery':
-                    try:
-                        projectdiscovery_search = projectdiscovery.SearchDiscovery(word)
-                        stor_lst.append(store(projectdiscovery_search, engineitem, store_host=True))
-                    except Exception as e:
-                        if isinstance(e, MissingKey):
-                            print(e)
-                        else:
-                            print('An exception has occurred in ProjectDiscovery')
+                    elif engineitem == 'virustotal':
+                        try:
+                            virustotal_search = virustotal.SearchVirustotal(word)
+                            stor_lst.append(store(virustotal_search, engineitem, store_host=True))
+                        except Exception as e:
+                            if isinstance(e, MissingKey):
+                                print(e)
 
-                elif engineitem == 'rapiddns':
-                    try:
-                        rapiddns_search = rapiddns.SearchRapidDns(word)
-                        stor_lst.append(store(rapiddns_search, engineitem, store_host=True))
-                    except Exception as e:
-                        print(e)
-
-                elif engineitem == 'rocketreach':
-                    try:
-                        rocketreach_search = rocketreach.SearchRocketReach(word, limit)
-                        stor_lst.append(store(rocketreach_search, engineitem, store_links=True))
-                    except Exception as e:
-                        if isinstance(e, MissingKey):
-                            print(e)
-                        else:
-                            print(f'An exception has occurred in RocketReach: {e}')
-
-                elif engineitem == 'subdomaincenter':
-                    try:
-                        subdomaincenter_search = subdomaincenter.SubdomainCenter(word)
-                        stor_lst.append(store(subdomaincenter_search, engineitem, store_host=True))
-                    except Exception as e:
-                        print(e)
-
-                elif engineitem == 'securityTrails':
-                    try:
-                        securitytrails_search = securitytrailssearch.SearchSecuritytrail(word)
-                        stor_lst.append(
-                            store(
-                                securitytrails_search,
-                                engineitem,
-                                store_host=True,
-                                store_ip=True,
+                    elif engineitem == 'yahoo':
+                        try:
+                            yahoo_search = yahoosearch.SearchYahoo(word, limit)
+                            stor_lst.append(
+                                store(
+                                    yahoo_search,
+                                    engineitem,
+                                    store_host=True,
+                                    store_emails=True,
+                                )
                             )
-                        )
-                    except Exception as e:
-                        if isinstance(e, MissingKey):
+                        except Exception as e:
                             print(e)
 
-                elif engineitem == 'sitedossier':
-                    try:
-                        sitedossier_search = sitedossier.SearchSitedossier(word)
-                        stor_lst.append(store(sitedossier_search, engineitem, store_host=True))
-                    except Exception as e:
-                        print(e)
-
-                elif engineitem == 'subdomainfinderc99':
-                    try:
-                        subdomainfinderc99_search = subdomainfinderc99.SearchSubdomainfinderc99(word)
-                        stor_lst.append(store(subdomainfinderc99_search, engineitem, store_host=True))
-                    except Exception as e:
-                        if isinstance(e, MissingKey):
-                            print(e)
-                        else:
-                            print(f'An exception has occurred in Subdomainfinderc99 search: {e}')
-
-                elif engineitem == 'threatminer':
-                    try:
-                        threatminer_search = threatminer.SearchThreatminer(word)
-                        stor_lst.append(
-                            store(
-                                threatminer_search,
-                                engineitem,
-                                store_host=True,
-                                store_ip=True,
+                    elif engineitem == 'zoomeye':
+                        try:
+                            zoomeye_search = zoomeyesearch.SearchZoomEye(word, limit)
+                            stor_lst.append(
+                                store(
+                                    zoomeye_search,
+                                    engineitem,
+                                    store_host=True,
+                                    store_emails=True,
+                                    store_ip=True,
+                                    store_interestingurls=True,
+                                    store_asns=True,
+                                )
                             )
-                        )
-                    except Exception as e:
-                        print(e)
-
-                elif engineitem == 'tomba':
+                        except Exception as e:
+                            if isinstance(e, MissingKey):
+                                print(e)
+            else:
+                if rest_args is not None:
                     try:
-                        tomba_search = tombasearch.SearchTomba(word, limit, start)
-                        stor_lst.append(
-                            store(
-                                tomba_search,
-                                engineitem,
-                                store_host=True,
-                                store_emails=True,
-                            )
-                        )
-                    except Exception as e:
-                        if isinstance(e, MissingKey):
-                            print(e)
-
-                elif engineitem == 'urlscan':
-                    try:
-                        urlscan_search = urlscan.SearchUrlscan(word)
-                        stor_lst.append(
-                            store(
-                                urlscan_search,
-                                engineitem,
-                                store_host=True,
-                                store_ip=True,
-                                store_interestingurls=True,
-                                store_asns=True,
-                            )
-                        )
-                    except Exception as e:
-                        print(e)
-
-                elif engineitem == 'virustotal':
-                    try:
-                        virustotal_search = virustotal.SearchVirustotal(word)
-                        stor_lst.append(store(virustotal_search, engineitem, store_host=True))
-                    except Exception as e:
-                        if isinstance(e, MissingKey):
-                            print(e)
-
-                elif engineitem == 'yahoo':
-                    try:
-                        yahoo_search = yahoosearch.SearchYahoo(word, limit)
-                        stor_lst.append(
-                            store(
-                                yahoo_search,
-                                engineitem,
-                                store_host=True,
-                                store_emails=True,
-                            )
-                        )
-                    except Exception as e:
-                        print(e)
-
-                elif engineitem == 'zoomeye':
-                    try:
-                        zoomeye_search = zoomeyesearch.SearchZoomEye(word, limit)
-                        stor_lst.append(
-                            store(
-                                zoomeye_search,
-                                engineitem,
-                                store_host=True,
-                                store_emails=True,
-                                store_ip=True,
-                                store_interestingurls=True,
-                                store_asns=True,
-                            )
-                        )
-                    except Exception as e:
-                        if isinstance(e, MissingKey):
-                            print(e)
-        else:
-            if rest_args is not None:
-                try:
-                    rest_args.dns_brute
-                except Exception:
+                        rest_args.dns_brute
+                    except Exception:
+                        print('\n[!] Invalid source.\n')
+                        sys.exit(1)
+                else:
                     print('\n[!] Invalid source.\n')
                     sys.exit(1)
-            else:
-                print('\n[!] Invalid source.\n')
-                sys.exit(1)
 
-    async def worker(queue):
-        while True:
-            # Get a "work item" out of the queue.
-            stor = await queue.get()
-            try:
-                await stor
-                queue.task_done()
-                # Notify the queue that the "work item" has been processed.
-            except Exception:
-                queue.task_done()
+        async def worker(queue):
+            while True:
+                # Get a "work item" out of the queue.
+                stor = await queue.get()
+                try:
+                    await stor
+                    queue.task_done()
+                    # Notify the queue that the "work item" has been processed.
+                except Exception:
+                    queue.task_done()
 
-    async def handler(lst):
-        queue = asyncio.Queue()
-        for stor_method in lst:
-            # enqueue the coroutines
-            queue.put_nowait(stor_method)
-        # Create three worker tasks to process the queue concurrently.
-        tasks = []
-        for i in range(3):
-            task = asyncio.create_task(worker(queue))
-            tasks.append(task)
+        async def handler(lst):
+            queue = asyncio.Queue()
+            for stor_method in lst:
+                # enqueue the coroutines
+                queue.put_nowait(stor_method)
+            # Create three worker tasks to process the queue concurrently.
+            tasks = []
+            for i in range(3):
+                task = asyncio.create_task(worker(queue))
+                tasks.append(task)
 
-        # Wait until the queue is fully processed.
-        await queue.join()
+            # Wait until the queue is fully processed.
+            await queue.join()
 
-        # Cancel our worker tasks.
-        for task in tasks:
-            task.cancel()
-        # Wait until all worker tasks are cancelled.
-        await asyncio.gather(*tasks, return_exceptions=True)
+            # Cancel our worker tasks.
+            for task in tasks:
+                task.cancel()
+            # Wait until all worker tasks are cancelled.
+            await asyncio.gather(*tasks, return_exceptions=True)
 
-    await handler(lst=stor_lst)
-    return_ips: list = []
-    if rest_args is not None and len(rest_filename) == 0 and rest_args.dns_brute is False:
-        # Indicates user is using REST api but not wanting output to be saved to a file
-        # cast to string so Rest API can understand the type
-        return_ips.extend([str(ip) for ip in sorted([netaddr.IPAddress(ip.strip()) for ip in set(all_ip)])])
-        # return list(set(all_emails)), return_ips, full, '', ''
-        all_hosts = [host.replace('www.', '') for host in all_hosts if host.replace('www.', '') in all_hosts]
-        all_hosts = list(sorted(set(all_hosts)))
-        return (
-            total_asns,
-            interesting_urls,
-            twitter_people_list_tracker,
-            linkedin_people_list_tracker,
-            linkedin_links_tracker,
-            all_urls,
-            all_ip,
-            all_emails,
-            all_hosts,
-        )
-    # Check to see if all_emails and all_hosts are defined.
-    try:
-        all_emails
-    except NameError:
-        print('\n\n[!] No emails found because all_emails is not defined.\n\n ')
-        sys.exit(1)
-    try:
-        all_hosts
-    except NameError:
-        print('\n\n[!] No hosts found because all_hosts is not defined.\n\n ')
-        sys.exit(1)
+        await handler(lst=stor_lst)
+        return_ips: list = []
+        if rest_args is not None and len(rest_filename) == 0 and rest_args.dns_brute is False:
+            # Indicates user is using REST api but not wanting output to be saved to a file
+            # cast to string so Rest API can understand the type
+            return_ips.extend([str(ip) for ip in sorted([netaddr.IPAddress(ip.strip()) for ip in set(all_ip)])])
+            # return list(set(all_emails)), return_ips, full, '', ''
+            all_hosts = [host.replace('www.', '') for host in all_hosts if host.replace('www.', '') in all_hosts]
+            all_hosts = list(sorted(set(all_hosts)))
+            return (
+                total_asns,
+                interesting_urls,
+                twitter_people_list_tracker,
+                linkedin_people_list_tracker,
+                linkedin_links_tracker,
+                all_urls,
+                all_ip,
+                all_emails,
+                all_hosts,
+            )
+        # Check to see if all_emails and all_hosts are defined.
+        try:
+            all_emails
+        except NameError:
+            print('\n\n[!] No emails found because all_emails is not defined.\n\n ')
+            sys.exit(1)
+        try:
+            all_hosts
+        except NameError:
+            print('\n\n[!] No hosts found because all_hosts is not defined.\n\n ')
+            sys.exit(1)
 
     # Results
     if len(total_asns) > 0:
@@ -1069,7 +1095,7 @@ async def start(rest_args: argparse.Namespace | None = None):
 
         # run all the reversing tasks concurrently
         await asyncio.gather(*__reverse_dns_tasks.values())
-        # Display the newly found hosts
+        # Displ-d/--domainay the newly found hosts
         print('\n[*] Hosts found after reverse lookup (in target domain):')
         print('--------------------------------------------------------')
         for xh in dnsrev:
